@@ -1,16 +1,1386 @@
-{
-  "name": "vet-profit-play",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.38.0",
-    "next": "14.0.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
+/**
+ * ========================= Vet Profit Play™ Dashboard (React + Supabase) =========================
+ *
+ * 🚨 Fix for error: "Cannot read properties of undefined (reading 'VITE_SUPABASE_URL')"
+ *
+ * In some environments (including this sandbox), `import.meta.env` may be undefined.
+ * This file now resolves Supabase credentials from several places (in order):
+ *   1) `import.meta.env.VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
+ *   2) `window.__SUPABASE_URL__` / `window.__SUPABASE_ANON_KEY`
+ *   3) `localStorage.VITE_SUPABASE_URL` / `localStorage.VITE_SUPABASE_ANON_KEY`
+ *   4) (Optionally) `process.env.*` when available
+ * If none are found, a built-in **Setup Panel** appears so you can paste the values.
+ *
+ * 👉 Quick use:
+ *    - Click "Setup Supabase" in the UI header, paste your Project URL & Anon Key, Save.
+ *    - Values are stored in localStorage and used immediately. No rebuild required.
+ *
+ * ================================================================================================
+ * Supabase SQL (Tenancy + Demo Data + RLS + QBO tokens)
+ * Paste in Supabase SQL editor to create all tables & policies. You can run this as-is for a demo.
+ * -----------------------------------------------------------------------------------------------
+ * -- Tenancy
+ * create table if not exists clinics (
+ *   id uuid primary key default gen_random_uuid(),
+ *   name text not null
+ * );
+ * create table if not exists user_profiles (
+ *   id uuid primary key references auth.users(id) on delete cascade,
+ *   clinic_id uuid references clinics(id),
+ *   email text,
+ *   created_at timestamptz default now()
+ * );
+ * create table if not exists domain_mappings (
+ *   host text primary key, -- e.g., brightpaws.vetprofitplay.com
+ *   clinic_id uuid not null references clinics(id)
+ * );
+ *
+ * -- Core KPIs
+ * create table if not exists kpi_revenue (
+ *   clinic_id uuid references clinics(id),
+ *   month text,
+ *   goal numeric not null,
+ *   actual numeric not null,
+ *   primary key (clinic_id, month)
+ * );
+ * create table if not exists kpi_profit (
+ *   clinic_id uuid references clinics(id),
+ *   month text,
+ *   margin numeric not null,
+ *   primary key (clinic_id, month)
+ * );
+ * create table if not exists expense_split (
+ *   clinic_id uuid references clinics(id),
+ *   name text,
+ *   value numeric not null,
+ *   primary key (clinic_id, name)
+ * );
+ * create table if not exists cats_daily (
+ *   clinic_id uuid references clinics(id),
+ *   day text,
+ *   saved numeric not null,
+ *   primary key (clinic_id, day)
+ * );
+ * create table if not exists ar_buckets (
+ *   clinic_id uuid references clinics(id),
+ *   range text,
+ *   amount numeric not null,
+ *   primary key (clinic_id, range)
+ * );
+ * create table if not exists dogs_monthly (
+ *   clinic_id uuid references clinics(id),
+ *   month text,
+ *   revenue_goal numeric not null,
+ *   revenue_actual numeric not null,
+ *   profit_goal numeric not null,
+ *   profit_actual numeric not null,
+ *   tax_goal numeric not null,
+ *   tax_actual numeric not null,
+ *   primary key (clinic_id, month)
+ * );
+ *
+ * -- QuickBooks tokens (store securely in production!)
+ * create table if not exists qbo_connections (
+ *   clinic_id uuid primary key references clinics(id) on delete cascade,
+ *   realm_id text,
+ *   access_token text,
+ *   refresh_token text,
+ *   token_expires_at timestamptz,
+ *   created_at timestamptz default now()
+ * );
+ *
+ * -- Demo data
+ * insert into clinics (name) values ('BrightPaws Veterinary Clinic') on conflict do nothing;
+ * with c as (select id from clinics limit 1)
+ * insert into kpi_revenue (clinic_id, month, goal, actual)
+ * select c.id,'Jan',100,92 from c union all
+ * select c.id,'Feb',110,104 from c union all
+ * select c.id,'Mar',115,110 from c union all
+ * select c.id,'Apr',120,108 from c union all
+ * select c.id,'May',125,118 from c union all
+ * select c.id,'Jun',130,121 from c on conflict do nothing;
+ * with c as (select id from clinics limit 1)
+ * insert into kpi_profit (clinic_id, month, margin)
+ * select c.id,'Jan',14 from c union all
+ * select c.id,'Feb',16 from c union all
+ * select c.id,'Mar',18 from c union all
+ * select c.id,'Apr',17 from c union all
+ * select c.id,'May',19 from c union all
+ * select c.id,'Jun',20 from c on conflict do nothing;
+ * with c as (select id from clinics limit 1)
+ * insert into expense_split (clinic_id, name, value)
+ * select c.id,'Payroll',48 from c union all
+ * select c.id,'COGS',22 from c union all
+ * select c.id,'Overhead',18 from c union all
+ * select c.id,'Marketing',7 from c union all
+ * select c.id,'Other',5 from c on conflict do nothing;
+ * with c as (select id from clinics limit 1)
+ * insert into cats_daily (clinic_id, day, saved)
+ * select c.id,'Mon',1.2 from c union all
+ * select c.id,'Tue',0.9 from c union all
+ * select c.id,'Wed',1.6 from c union all
+ * select c.id,'Thu',1.0 from c union all
+ * select c.id,'Fri',1.8 from c union all
+ * select c.id,'Sat',0.7 from c union all
+ * select c.id,'Sun',1.1 from c on conflict do nothing;
+ * with c as (select id from clinics limit 1)
+ * insert into ar_buckets (clinic_id, range, amount)
+ * select c.id,'0-30',18 from c union all
+ * select c.id,'31-60',6 from c union all
+ * select c.id,'61+',4 from c on conflict do nothing;
+ * with c as (select id from clinics limit 1)
+ * insert into dogs_monthly
+ * select c.id,'Jan',100,92,18,14,12,10 from c union all
+ * select c.id,'Feb',110,104,18,16,14,12 from c union all
+ * select c.id,'Mar',115,110,18,18,15,13 from c union all
+ * select c.id,'Apr',120,108,18,17,16,14 from c union all
+ * select c.id,'May',125,118,18,19,17,16 from c union all
+ * select c.id,'Jun',130,121,18,20,18,17 from c on conflict do nothing;
+ *
+ * -- RLS (Row Level Security)
+ * alter table kpi_revenue enable row level security;
+ * alter table kpi_profit enable row level security;
+ * alter table expense_split enable row level security;
+ * alter table cats_daily enable row level security;
+ * alter table ar_buckets enable row level security;
+ * alter table dogs_monthly enable row level security;
+ * alter table user_profiles enable row level security;
+ *
+ * create or replace view my_profile as
+ *   select p.* from user_profiles p where p.id = auth.uid();
+ * create policy "profile-is-self" on user_profiles for select using (id = auth.uid());
+ * create policy "by-clinic-revenue" on kpi_revenue for select using (clinic_id = (select clinic_id from my_profile limit 1));
+ * create policy "by-clinic-profit" on kpi_profit for select using (clinic_id = (select clinic_id from my_profile limit 1));
+ * create policy "by-clinic-expense" on expense_split for select using (clinic_id = (select clinic_id from my_profile limit 1));
+ * create policy "by-clinic-cats" on cats_daily for select using (clinic_id = (select clinic_id from my_profile limit 1));
+ * create policy "by-clinic-ar" on ar_buckets for select using (clinic_id = (select clinic_id from my_profile limit 1));
+ * create policy "by-clinic-dogs" on dogs_monthly for select using (clinic_id = (select clinic_id from my_profile limit 1));
+ * ================================================================================================
+ */
+
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { CheckCircle, AlertTriangle, XCircle, TrendingUp, Wallet, PiggyBank, Activity, Target, Wrench } from "lucide-react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  Legend,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
+
+// ============================== Config Resolution ===============================
+function getEnvSafe(key: string): string {
+  try {
+    // 1) Vite env
+    const vite = (typeof import.meta !== "undefined" && (import.meta as any)?.env?.[key]) as string | undefined;
+    if (vite) return vite;
+  } catch {}
+  try {
+    // 2) window globals
+    const win = (globalThis as any) || (window as any);
+    const fromWindow = win?.[`__${key.replace("VITE_", "")}__`] || win?.[key];
+    if (fromWindow) return String(fromWindow);
+  } catch {}
+  try {
+    // 3) localStorage
+    const ls = globalThis?.localStorage;
+    const fromLS = ls?.getItem(key) || ls?.getItem(key.replace("VITE_", ""));
+    if (fromLS) return String(fromLS);
+  } catch {}
+  try {
+    // 4) process.env (node/SSR)
+    const proc = (typeof process !== "undefined" ? (process as any) : undefined);
+    const fromProc = proc?.env?.[key];
+    if (fromProc) return String(fromProc);
+  } catch {}
+  return "";
+}
+
+type AppConfig = { supabaseUrl: string; supabaseAnonKey: string };
+const defaultConfig: AppConfig = {
+  supabaseUrl: getEnvSafe("VITE_SUPABASE_URL"),
+  supabaseAnonKey: getEnvSafe("VITE_SUPABASE_ANON_KEY"),
+};
+
+const ConfigCtx = createContext<{
+  config: AppConfig;
+  setConfig: (c: AppConfig) => void;
+  supabase: SupabaseClient | null;
+}>({ config: defaultConfig, setConfig: () => {}, supabase: null });
+
+function ConfigProvider({ children }: { children: React.ReactNode }) {
+  const [config, setConfigState] = useState<AppConfig>(() => ({
+    supabaseUrl: defaultConfig.supabaseUrl,
+    supabaseAnonKey: defaultConfig.supabaseAnonKey,
+  }));
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
+
+  function setConfig(c: AppConfig) {
+    try {
+      localStorage.setItem("VITE_SUPABASE_URL", c.supabaseUrl);
+      localStorage.setItem("VITE_SUPABASE_ANON_KEY", c.supabaseAnonKey);
+    } catch {}
+    setConfigState(c);
+  }
+
+  useEffect(() => {
+    if (config.supabaseUrl && config.supabaseAnonKey) {
+      setSupabase(createClient(config.supabaseUrl, config.supabaseAnonKey));
+    } else {
+      setSupabase(null);
+    }
+  }, [config.supabaseUrl, config.supabaseAnonKey]);
+
+  return (
+    <ConfigCtx.Provider value={{ config, setConfig, supabase }}>
+      {children}
+    </ConfigCtx.Provider>
+  );
+}
+
+function useSupabase() {
+  const ctx = useContext(ConfigCtx);
+  const hasConfig = !!(ctx.config.supabaseUrl && ctx.config.supabaseAnonKey);
+  return { ...ctx, hasConfig };
+}
+
+// ============================= Refresh broadcast =============================
+const RefreshCtx = React.createContext<{ refreshTick: number; bump: () => void }>({ refreshTick: 0, bump: () => {} });
+function RefreshProvider({ children }: { children: React.ReactNode }) {
+  const [refreshTick, setTick] = React.useState(0);
+  const bump = () => setTick(t => (t + 1) % 1_000_000);
+  return <RefreshCtx.Provider value={{ refreshTick, bump }}>{children}</RefreshCtx.Provider>;
+}
+function useDashboardRefresh() { return React.useContext(RefreshCtx); }
+
+
+// ============================= Setup / Diagnostics UI ============================
+function SetupPanel() {
+  const { config, setConfig } = useSupabase();
+  const [url, setUrl] = useState(config.supabaseUrl);
+  const [key, setKey] = useState(config.supabaseAnonKey);
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Wrench className="h-5 w-5" /> Setup Supabase</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Paste your <strong>Project URL</strong> and <strong>Anon Key</strong>. These will be stored in localStorage and used immediately.
+        </p>
+        <div className="grid gap-2">
+          <label className="text-xs">Supabase Project URL</label>
+          <Input placeholder="https://YOUR-PROJECT.supabase.co" value={url} onChange={(e)=>setUrl(e.target.value)} />
+        </div>
+        <div className="grid gap-2">
+          <label className="text-xs">Supabase Anon Key</label>
+          <Input placeholder="eyJhbGciOi..." value={key} onChange={(e)=>setKey(e.target.value)} />
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={()=> setConfig({ supabaseUrl: url.trim(), supabaseAnonKey: key.trim() })}>Save</Button>
+          <Button variant="outline" onClick={()=>{ setUrl(""); setKey(""); setConfig({ supabaseUrl: "", supabaseAnonKey: "" }); }}>Clear</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ================================ Types & UI Bits ================================
+interface RevRow { month: string; goal: number; actual: number }
+interface ProfitRow { month: string; margin: number }
+interface ExpenseRow { name: string; value: number }
+interface CatRow { day: string; saved: number }
+interface ArRow { range: string; amount: number }
+interface DogsRow {
+  month: string;
+  revenue_goal: number; revenue_actual: number;
+  profit_goal: number; profit_actual: number;
+  tax_goal: number; tax_actual: number;
+}
+
+const HealthBadge: React.FC<{ status: "green" | "yellow" | "red" }> = ({ status }) => {
+  const map = {
+    green: { label: "Healthy", Icon: CheckCircle },
+    yellow: { label: "Watch", Icon: AlertTriangle },
+    red: { label: "At Risk", Icon: XCircle },
+  } as const;
+  const { label, Icon } = map[status];
+  const color = status === "green" ? "bg-green-100 text-green-700" : status === "yellow" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700";
+  return (
+    <Badge className={`gap-1 px-3 py-1 rounded-full ${color}`}>
+      <Icon className="h-4 w-4" /> {label}
+    </Badge>
+  );
+};
+
+const StatTile: React.FC<{ label: string; value: string; sub?: string; icon?: React.ReactNode }>= ({ label, value, sub, icon }) => (
+  <Card className="shadow-sm border-muted/40">
+    <CardContent className="p-4 flex items-center gap-4">
+      <div className="h-10 w-10 rounded-2xl flex items-center justify-center bg-muted/50">{icon}</div>
+      <div className="flex-1">
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+        <div className="text-2xl font-semibold leading-tight">{value}</div>
+        {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+      </div>
+    </CardContent>
+  </Card>
+);
+
+// ================================ Auth / Clinic ================================
+function useAuthClinic() {
+  const { supabase } = useSupabase();
+  const { refreshTick } = useDashboardRefresh();
+  const [session, setSession] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
+  const [clinicId, setClinicId] = useState<string | null>(null);
+  const [qboConnected, setQboConnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let unsub: any;
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+      unsub = supabase.auth.onAuthStateChange((_e, sess) => setSession(sess.data.session));
+    })();
+    return () => { unsub?.data?.subscription?.unsubscribe?.(); };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      try {
+        // Try domain mapping first; ignore errors if table not created yet.
+        let mappedClinic: string | null = null;
+        try {
+          const host = (typeof window !== 'undefined' ? window.location.host.toLowerCase() : '').trim();
+          if (host) {
+            const { data: map } = await supabase.from('domain_mappings').select('clinic_id').eq('host', host).maybeSingle();
+            mappedClinic = map?.clinic_id ?? null;
+          }
+        } catch {}
+
+        if (session?.user?.id) {
+          try {
+            const { data: prof } = await supabase.from('my_profile').select('*').maybeSingle();
+            setProfile(prof);
+            setClinicId(mappedClinic ?? prof?.clinic_id ?? null);
+          } catch {
+            setClinicId(mappedClinic ?? null);
+          }
+        } else {
+          setProfile(null);
+          setClinicId(mappedClinic);
+        }
+
+        const cid = mappedClinic ?? profile?.clinic_id ?? null;
+        if (cid) {
+          try {
+            const { data: qbo } = await supabase.from('qbo_connections').select('clinic_id').eq('clinic_id', cid).maybeSingle();
+            setQboConnected(!!qbo);
+          } catch {
+            setQboConnected(false);
+          }
+        } else {
+          setQboConnected(false);
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    })();
+  }, [supabase, session?.user?.id]);
+
+  async function signIn(email: string) {
+    if (!supabase) return alert('Configure Supabase first.');
+    await supabase.auth.signInWithOtp({ email });
+    alert('Magic link sent. Check your email.');
+  }
+  async function signOut() { if (supabase) await supabase.auth.signOut(); }
+
+  return { session, profile, clinicId, qboConnected, signIn, signOut };
+}
+
+// =============================== Data Loading ===============================
+function useSupabaseDashboardData() {
+  const { supabase } = useSupabase();
+  const { clinicId } = useAuthClinic();
+  const { bump } = useDashboardRefresh();
+  const [revenue, setRevenue] = useState<RevRow[]>([]);
+  const [profit, setProfit] = useState<ProfitRow[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [cats, setCats] = useState<CatRow[]>([]);
+  const [ar, setAr] = useState<ArRow[]>([]);
+  const [dogs, setDogs] = useState<DogsRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!supabase) { setLoading(false); return; }
+      try {
+        if (!clinicId) { setLoading(false); return; }
+        setLoading(true);
+        const [revRes, profRes, expRes, cdRes, abRes, dgRes] = await Promise.all([
+          supabase.from('kpi_revenue').select('month, goal, actual'),
+          supabase.from('kpi_profit').select('month, margin'),
+          supabase.from('expense_split').select('name, value'),
+          supabase.from('cats_daily').select('day, saved'),
+          supabase.from('ar_buckets').select('range, amount'),
+          supabase.from('dogs_monthly').select('month, revenue_goal, revenue_actual, profit_goal, profit_actual, tax_goal, tax_actual'),
+        ]);
+        const err = revRes.error || profRes.error || expRes.error || cdRes.error || abRes.error || dgRes.error;
+        if (err) throw err;
+        if (cancelled) return;
+        setRevenue((revRes.data as RevRow[] ?? []).sort((a,b)=>sortByMonth(a.month,b.month)));
+        setProfit((profRes.data as ProfitRow[] ?? []).sort((a,b)=>sortByMonth(a.month,b.month)));
+        setExpenses((expRes.data as ExpenseRow[] ?? []));
+        setCats((cdRes.data as CatRow[] ?? []));
+        setAr((abRes.data as ArRow[] ?? []));
+        setDogs((dgRes.data as DogsRow[] ?? []).sort((a,b)=>sortByMonth(a.month,b.month)));
+        setError(null);
+      } catch (e: any) {
+        console.error(e);
+        setError(e.message ?? 'Failed to load data');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true };
+  }, [supabase, clinicId, refreshTick]);
+
+  const latest = useMemo(() => revenue[revenue.length-1], [revenue]);
+  const tiles = useMemo(() => {
+    const monthlyRevenue = latest ? `$${(latest.actual*1000).toLocaleString()}` : "$118,400";
+    const goalRevenue = latest ? `$${(latest.goal*1000).toLocaleString()}` : "$125,000";
+    const latestProfit = profit[profit.length-1]?.margin ?? 20;
+    const cashReservesMonths = 2.6;
+    const taxSaved = dogs[dogs.length-1]?.tax_actual ?? 68.3;
+    const taxGoal = dogs[dogs.length-1]?.tax_goal ?? 82.5;
+
+    return { monthlyRevenue, goalRevenue, profitPct: `${latestProfit}%`, cashMonths: `${cashReservesMonths} months`, taxSaved: `$${(taxSaved*1000).toLocaleString()}`, taxGoal: `$${(taxGoal*1000).toLocaleString()}` };
+  }, [latest, profit, dogs]);
+
+  const status: 'green'|'yellow'|'red' = useMemo(() => {
+    const revPct = latest ? (latest.actual / latest.goal) : 0.95;
+    const prof = profit[profit.length-1]?.margin ?? 20;
+    if (revPct >= 1 && prof >= 18) return 'green';
+    if (revPct >= 0.9) return 'yellow';
+    return 'red';
+  }, [latest, profit]);
+
+  return { revenue, profit, expenses, cats, ar, dogs, tiles, status, loading, error };
+}
+
+// Sort helper for Jan..Dec labels
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function sortByMonth(a: string, b: string) { return MONTHS.indexOf(a) - MONTHS.indexOf(b); }
+
+// ================================ Header Panels ================================
+function AuthPanel() {
+  const { supabase } = useSupabase();
+  const { session, signIn, signOut } = useAuthClinic();
+  const [email, setEmail] = useState('');
+
+  if (!supabase) {
+    return <Badge className="rounded-full" variant="secondary">Auth: Configure Supabase</Badge>;
+  }
+
+  if (session?.user) {
+    return (
+      <div className="flex items-center gap-2">
+        <Badge className="rounded-full">{session.user.email}</Badge>
+        <Button variant="outline" size="sm" onClick={signOut}>Sign out</Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Input className="w-56" placeholder="you@clinic.com" value={email} onChange={(e)=>setEmail(e.target.value)} />
+      <Button size="sm" onClick={()=>email && signIn(email)}>Send magic link</Button>
+    </div>
+  );
+}
+
+function QBOPanel() {
+  const { supabase } = useSupabase();
+  const { clinicId, qboConnected } = useAuthClinic();
+  const connect = () => {
+    if (!clinicId) return alert('No clinic selected. Sign in or set a domain mapping.');
+    window.location.href = `/api/qbo/connect?clinic_id=${clinicId}`;
+  };
+  if (!supabase) {
+    return <Badge className="rounded-full" variant="secondary">QuickBooks: Configure Supabase</Badge>;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Badge className="rounded-full" variant={qboConnected ? undefined : "secondary"}>{qboConnected ? 'QuickBooks: Connected' : 'QuickBooks: Not connected'}</Badge>
+      {!qboConnected && <Button size="sm" onClick={connect}>Connect QuickBooks</Button>}
+    </div>
+  );
+}
+
+function SyncPanel() {
+  const { clinicId } = useAuthClinic();
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function syncNow() {
+    if (!clinicId) return alert('No clinic selected. Sign in or set a domain mapping.');
+    setLoading(true); setMsg(null);
+    try {
+      await fetch(`/api/qbo/refresh?clinic_id=${clinicId}`);
+      const res = await fetch('/api/qbo/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clinic_id: clinicId }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'sync failed');
+      setMsg(`Synced ${json.updatedMonths ?? 0} month(s). Charts refreshed.`);
+      bump(); // trigger in-app data reload without full page refresh
+    } catch (e:any) {
+      setMsg(e?.message || 'Sync failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button size="sm" variant="secondary" onClick={syncNow} disabled={loading}>{loading ? 'Syncing…' : 'Sync now'}</Button>
+      {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+    </div>
+  );
+}
+
+function ConfigButton() {
+  const { hasConfig } = useSupabase();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex items-center gap-2">
+      <Button size="sm" variant={hasConfig ? "outline" : "default"} onClick={()=>setOpen(!open)}>
+        {hasConfig ? 'Update Supabase' : 'Setup Supabase'}
+      </Button>
+      {open && (
+        <div className="absolute z-50 top-20 right-6 max-w-xl w-[32rem]">
+          <SetupPanel />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================================== Main UI ==================================
+function DashboardInner() {
+  const { hasConfig } = useSupabase();
+  const { revenue, profit, expenses, cats, ar, dogs, tiles, status, loading, error } = useSupabaseDashboardData();
+
+  if (!hasConfig) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">The Vet Profit Play™</h1>
+          <p className="text-muted-foreground">Before we can load data, add your Supabase credentials.</p>
+        </div>
+        <SetupPanel />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Top Banner */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">The Vet Profit Play™</h1>
+          <p className="text-muted-foreground">Clinic Health at a Glance · BrightPaws Veterinary Clinic</p>
+        </div>
+        <div className="flex items-center gap-2 relative">
+          <ConfigButton />
+          <AuthPanel />
+          <QBOPanel />
+          <SyncPanel />
+          <Input className="w-52" placeholder="Search metrics…" />
+          <Button onClick={() => window.location.reload()}>Refresh</Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-xl bg-red-50 text-sm">Failed to load from Supabase: {error}</div>
+      )}
+
+      {/* KPI Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <StatTile label="Monthly Revenue" value={tiles.monthlyRevenue} sub={`Goal ${tiles.goalRevenue}`} icon={<TrendingUp className="h-5 w-5" />} />
+        <StatTile label="Net Profit Margin" value={tiles.profitPct} sub="Goal 18%" icon={<Activity className="h-5 w-5" />} />
+        <StatTile label="Cash Reserves" value={tiles.cashMonths} sub="Goal 3 months" icon={<Wallet className="h-5 w-5" />} />
+        <StatTile label="Tax Savings Balance" value={tiles.taxSaved} sub={`YTD target ${tiles.taxGoal}`} icon={<PiggyBank className="h-5 w-5" />} />
+      </div>
+
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="cats">CATs</TabsTrigger>
+          <TabsTrigger value="dogs">DOGs</TabsTrigger>
+          <TabsTrigger value="benchmarks">Benchmarks</TabsTrigger>
+          <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
+          <TabsTrigger value="alerts">Alerts</TabsTrigger>
+        </TabsList>
+
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <Card className="xl:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Revenue vs Goal</CardTitle>
+              </CardHeader>
+              <CardContent className="h-64">
+                {loading ? (
+                  <div className="h-full grid place-items-center text-sm text-muted-foreground">Loading…</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={revenue} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="goal" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="actual" strokeWidth={3} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle>Expense Mix</CardTitle>
+              </CardHeader>
+              <CardContent className="h-64">
+                {loading ? (
+                  <div className="h-full grid place-items-center text-sm text-muted-foreground">Loading…</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={expenses} dataKey="value" nameKey="name" outerRadius={90} label />
+                      {expenses.map((_, i) => (
+                        <Cell key={i} />
+                      ))}
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <Card className="xl:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Net Profit % (3-mo)</CardTitle>
+              </CardHeader>
+              <CardContent className="h-64">
+                {loading ? (
+                  <div className="h-full grid place-items-center text-sm text-muted-foreground">Loading…</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={profit} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="fillProfit" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopOpacity={0.3}/>
+                          <stop offset="95%" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="margin" fillOpacity={1} fill="url(#fillProfit)" strokeWidth={3} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle>AR Aging</CardTitle>
+              </CardHeader>
+              <CardContent className="h-64">
+                {loading ? (
+                  <div className="h-full grid place-items-center text-sm text-muted-foreground">Loading…</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={ar} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="range" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="amount" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* CATs Tab */}
+        <TabsContent value="cats" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2"><PiggyBank className="h-5 w-5" /> Daily CATs Contributions</CardTitle>
+              </CardHeader>
+              <CardContent className="h-64">
+                {loading ? (
+                  <div className="h-full grid place-items-center text-sm text-muted-foreground">Loading…</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={cats} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="day" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="saved" strokeWidth={3} dot />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-1">
+                <CardTitle>CATs Targets</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Emergency Fund</p>
+                    <p className="text-xs text-muted-foreground">Goal: 3 months</p>
+                  </div>
+                  <Badge className="rounded-full">62%</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">On-time Billing</p>
+                    <p className="text-xs text-muted-foreground">Goal: 95%</p>
+                  </div>
+                  <Badge className="rounded-full">91%</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Inventory vs Budget</p>
+                    <p className="text-xs text-muted-foreground">Goal: ≤ 22% of rev</p>
+                  </div>
+                  <Badge className="rounded-full">24%</Badge>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* DOGs Tab */}
+        <TabsContent value="dogs" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader className="pb-1">
+                <CardTitle className="flex items-center gap-2"><Target className="h-5 w-5" /> Monthly DOGs</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Revenue</p>
+                    <p className="text-xs text-muted-foreground">Goal {dogs[dogs.length-1]?.revenue_goal ?? 125}k</p>
+                  </div>
+                  <Badge className="rounded-full">{dogs[dogs.length-1]?.revenue_actual ?? 118}k</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Net Profit %</p>
+                    <p className="text-xs text-muted-foreground">Goal {dogs[dogs.length-1]?.profit_goal ?? 18}%</p>
+                  </div>
+                  <Badge className="rounded-full">{dogs[dogs.length-1]?.profit_actual ?? 20}%</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Tax Reserve</p>
+                    <p className="text-xs text-muted-foreground">YTD Goal {(dogs[dogs.length-1]?.tax_goal ?? 82.5)}k</p>
+                  </div>
+                  <Badge className="rounded-full">${(dogs[dogs.length-1]?.tax_actual ?? 68.3)}k</Badge>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle>DOGs Progress</CardTitle>
+              </CardHeader>
+              <CardContent className="h-64">
+                {loading ? (
+                  <div className="h-full grid place-items-center text-sm text-muted-foreground">Loading…</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={revenue} margin={{ left: 6, right: 6, top: 10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="goal" radius={[6,6,0,0]} />
+                      <Bar dataKey="actual" radius={[6,6,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Benchmarks Tab */}
+        <TabsContent value="benchmarks" className="space-y-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Clinic Benchmarks (rules of thumb)</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              <Badge className="justify-start">Payroll ≤ 50% of revenue</Badge>
+              <Badge className="justify-start">COGS 18–25% of revenue</Badge>
+              <Badge className="justify-start">Overhead 15–20% of revenue</Badge>
+              <Badge className="justify-start">Net Profit ≥ 15–20%</Badge>
+              <Badge className="justify-start">Cash Reserves ≥ 3 months</Badge>
+              <Badge className="justify-start">Tax Save ~22% of gross</Badge>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Scorecard Tab */}
+        <TabsContent value="scorecard" className="space-y-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Monthly Scorecard</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <Card className="border-green-300">
+                <CardContent className="p-4 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Net Profit %</p>
+                    <HealthBadge status="green" />
+                  </div>
+                  <p className="text-2xl font-semibold">{(profit[profit.length-1]?.margin ?? 20)}%</p>
+                  <p className="text-xs text-muted-foreground">Goal 18%</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-amber-300">
+                <CardContent className="p-4 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Revenue</p>
+                    <HealthBadge status="yellow" />
+                  </div>
+                  <p className="text-2xl font-semibold">{tiles.monthlyRevenue}</p>
+                  <p className="text-xs text-muted-foreground">Goal {tiles.goalRevenue}</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-red-300">
+                <CardContent className="p-4 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Tax Reserve</p>
+                    <HealthBadge status="red" />
+                  </div>
+                  <p className="text-2xl font-semibold">{tiles.taxSaved}</p>
+                  <p className="text-xs text-muted-foreground">YTD Goal {tiles.taxGoal}</p>
+                </CardContent>
+              </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Alerts Tab */}
+        <TabsContent value="alerts" className="space-y-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Automated Alerts & Suggestions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-red-50">
+                <XCircle className="h-5 w-5 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">AR over threshold</p>
+                  <p className="text-xs text-muted-foreground">{(() => {
+                    const over = ar.filter(r => r.range !== '0-30').reduce((s,r)=>s+(r.amount||0),0);
+                    const latestK = (Number((revenue[revenue.length-1]?.actual ?? 118)));
+                    return `${over}k (≥ 15% of monthly rev = ${(latestK*0.15).toFixed(1)}k)`;
+                  })()}</p>
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" variant="secondary">Send reminders</Button>
+                    <Button size="sm" variant="outline">View aging</Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-50">
+                <AlertTriangle className="h-5 w-5 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">Inventory over budget</p>
+                  <p className="text-xs text-muted-foreground">COGS trending {(expenses.find(e=>e.name==='COGS')?.value ?? 24)}% vs goal 22%</p>
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" variant="secondary">Trim next order 5%</Button>
+                    <Button size="sm" variant="outline">Open inventory</Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-blue-50">
+                <CheckCircle className="h-5 w-5 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">Savings milestone hit</p>
+                  <p className="text-xs text-muted-foreground">Emergency fund reached 2.6 months</p>
+                  <div className="mt-2"><Button size="sm">Raise target to 3.5 months</Button></div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </>
+  );
+}
+
+export default function VetProfitPlayDashboard() {
+  return (
+    <ConfigProvider>
+      <RefreshProvider>
+      <div className="p-6 md:p-8 space-y-6 max-w-screen-2xl mx-auto">
+        <DashboardInner />
+      </div>
+      </RefreshProvider>
+    </ConfigProvider>
+  );
+}
+
+/* ============================================================================
+ * Next.js API: QuickBooks OAuth Flow (Connect + Callback)
+ * ----------------------------------------------------------------------------
+ * Files below are intended for a Next.js App Router project (Next 13/14):
+ *   - app/api/qbo/connect/route.ts
+ *   - app/api/qbo/callback/route.ts
+ * And a small helper:
+ *   - lib/qboClient.ts
+ *
+ * If you use Pages Router, see the alternative at the bottom of this block.
+ *
+ * SECURITY NOTES
+ * - Use the Supabase **service-role key** ONLY in server code.
+ * - Never expose it to the client/browser.
+ * - Store QBO tokens encrypted at rest in production (KMS/Vault).
+ *
+ * ENV VARS REQUIRED (server-side)
+ *   QUICKBOOKS_CLIENT_ID=...
+ *   QUICKBOOKS_CLIENT_SECRET=...
+ *   QUICKBOOKS_REDIRECT_URL=https://YOUR_DOMAIN/api/qbo/callback
+ *   QUICKBOOKS_ENV=sandbox  # or 'production'
+ *   SUPABASE_URL=...
+ *   SUPABASE_SERVICE_ROLE_KEY=...
+ *   NEXT_PUBLIC_SUPABASE_URL=...             # optional, if you already have it
+ *   NEXT_PUBLIC_SUPABASE_ANON_KEY=...        # optional, if you already have it
+ *
+ * SCOPES (typical):
+ *   com.intuit.quickbooks.accounting openid profile email phone address
+ * ============================================================================ */
+
+// ===================== lib/qboClient.ts =====================
+// Place in: lib/qboClient.ts
+
+/*
+import OAuthClient from 'intuit-oauth';
+
+export function createIntuitClient() {
+  const clientId = process.env.QUICKBOOKS_CLIENT_ID!;
+  const clientSecret = process.env.QUICKBOOKS_CLIENT_SECRET!;
+  const redirectUri = process.env.QUICKBOOKS_REDIRECT_URL!;
+  const env = (process.env.QUICKBOOKS_ENV || 'sandbox') as 'sandbox' | 'production';
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error('Missing QuickBooks env vars. Please set QUICKBOOKS_CLIENT_ID/SECRET and QUICKBOOKS_REDIRECT_URL');
+  }
+
+  return new OAuthClient({
+    clientId,
+    clientSecret,
+    environment: env,
+    redirectUri,
+  });
+}
+*/
+
+// ===================== app/api/qbo/connect/route.ts =====================
+// Place in: app/api/qbo/connect/route.ts
+/*
+import { NextRequest, NextResponse } from 'next/server';
+import { createIntuitClient } from '@/lib/qboClient';
+import crypto from 'crypto';
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const clinic_id = searchParams.get('clinic_id');
+  if (!clinic_id) {
+    return NextResponse.json({ error: 'clinic_id is required' }, { status: 400 });
+  }
+
+  const client = createIntuitClient();
+  const state = crypto.randomBytes(16).toString('hex') + ':' + clinic_id;
+  const scopes = [
+    'com.intuit.quickbooks.accounting',
+    'openid', 'profile', 'email', 'phone', 'address',
+  ];
+
+  // Persist state in an HttpOnly cookie to validate in callback
+  const authUri = client.authorizeUri({ scope: scopes, state });
+  const res = NextResponse.redirect(authUri);
+  res.cookies.set('qbo_state', state, { httpOnly: true, secure: true, sameSite: 'lax', path: '/' });
+  return res;
+}
+*/
+
+// ===================== app/api/qbo/callback/route.ts =====================
+// Place in: app/api/qbo/callback/route.ts
+/*
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { createIntuitClient } from '@/lib/qboClient';
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const state = url.searchParams.get('state') || '';
+  const code = url.searchParams.get('code');
+  const realmId = url.searchParams.get('realmId');
+
+  const cookieState = req.cookies.get('qbo_state')?.value || '';
+  if (!state || state !== cookieState) {
+    return NextResponse.json({ error: 'Invalid state' }, { status: 400 });
+  }
+
+  if (!code || !realmId) {
+    return NextResponse.json({ error: 'Missing code or realmId' }, { status: 400 });
+  }
+
+  const [, clinic_id] = state.split(':');
+
+  const client = createIntuitClient();
+  try {
+    const tokenRes = await client.createToken(req.url); // SDK parses code & exchange internally
+    const token = tokenRes.getJson();
+
+    const accessToken = token.access_token;
+    const refreshToken = token.refresh_token;
+    const expiresIn = token.x_refresh_token_expires_in || token.expires_in; // seconds
+    const expiresAt = new Date(Date.now() + Number(expiresIn) * 1000).toISOString();
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const { error } = await supabase
+      .from('qbo_connections')
+      .upsert({
+        clinic_id,
+        realm_id: realmId,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_expires_at: expiresAt,
+      }, { onConflict: 'clinic_id' });
+
+    if (error) throw error;
+
+    // Clear cookie + redirect back to app
+    const res = NextResponse.redirect(new URL('/?qbo=connected', req.url));
+    res.cookies.delete('qbo_state');
+    return res;
+  } catch (e: any) {
+    console.error('QBO callback error:', e?.message || e);
+    return NextResponse.redirect(new URL('/?qbo=error', req.url));
   }
 }
+*/
+
+// ===================== OPTIONAL: Pages Router versions =====================
+// If your project uses Pages Router, create files under /pages/api/qbo/*.ts
+/*
+// /pages/api/qbo/connect.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { createIntuitClient } from '@/lib/qboClient';
+import crypto from 'crypto';
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const clinic_id = req.query.clinic_id as string;
+  if (!clinic_id) return res.status(400).json({ error: 'clinic_id is required' });
+  const client = createIntuitClient();
+  const state = crypto.randomBytes(16).toString('hex') + ':' + clinic_id;
+  const scopes = ['com.intuit.quickbooks.accounting','openid','profile','email','phone','address'];
+  const authUri = client.authorizeUri({ scope: scopes, state });
+  res.setHeader('Set-Cookie', `qbo_state=${state}; HttpOnly; Path=/; SameSite=Lax; Secure`);
+  res.redirect(authUri);
+}
+
+// /pages/api/qbo/callback.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { createClient } from '@supabase/supabase-js';
+import { createIntuitClient } from '@/lib/qboClient';
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { state, code, realmId } = req.query as Record<string, string>;
+  const cookieState = req.cookies['qbo_state'];
+  if (!state || state !== cookieState) return res.status(400).json({ error: 'Invalid state' });
+  if (!code || !realmId) return res.status(400).json({ error: 'Missing code or realmId' });
+  const [, clinic_id] = state.split(':');
+
+  const client = createIntuitClient();
+  try {
+    const tokenRes = await client.createToken(req.url as string);
+    const token = tokenRes.getJson();
+    const accessToken = token.access_token;
+    const refreshToken = token.refresh_token;
+    const expiresIn = token.x_refresh_token_expires_in || token.expires_in;
+    const expiresAt = new Date(Date.now() + Number(expiresIn) * 1000).toISOString();
+
+    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { error } = await supabase
+      .from('qbo_connections')
+      .upsert({ clinic_id, realm_id: realmId, access_token: accessToken, refresh_token: refreshToken, token_expires_at: expiresAt }, { onConflict: 'clinic_id' });
+    if (error) throw error;
+
+    res.setHeader('Set-Cookie', 'qbo_state=; HttpOnly; Path=/; Max-Age=0;');
+    res.redirect('/?qbo=connected');
+  } catch (e: any) {
+    console.error('QBO callback error:', e?.message || e);
+    res.redirect('/?qbo=error');
+  }
+}
+*/
+
+// ===================== Simple Route Tests (manual) =====================
+// 1) Missing clinic_id → 400
+//    curl -i "http://localhost:3000/api/qbo/connect"
+// 2) With clinic_id → 302 to Intuit
+//    curl -i "http://localhost:3000/api/qbo/connect?clinic_id=TEST-CLINIC"
+// 3) Callback with wrong state → 400/redirect error
+// 4) Callback happy path stores tokens in qbo_connections for the clinic
+
+/* ============================================================================
+ * END QuickBooks OAuth API routes
+ * ============================================================================ */
+
+/* ============================================================================
+ * Next.js API: Token Refresh + Basic Sync (AR Aging + P&L by Month YTD)
+ * ----------------------------------------------------------------------------
+ * Adds two routes:
+ *   - app/api/qbo/refresh/route.ts  (refreshes tokens for a clinic)
+ *   - app/api/qbo/sync/route.ts     (pulls AR Aging + P&L and upserts KPIs)
+ * Includes lightweight helpers in lib/qboApi.ts to call QBO Accounting APIs.
+ *
+ * These defaults keep your earlier behavior (redirect to /?qbo=connected) intact.
+ * ============================================================================ */
+
+// ===================== lib/qboApi.ts =====================
+// Place in: lib/qboApi.ts
+/*
+import OAuthClient from 'intuit-oauth';
+
+export function getQboBase(env: 'sandbox'|'production') {
+  return env === 'production' ? 'https://quickbooks.api.intuit.com' : 'https://sandbox-quickbooks.api.intuit.com';
+}
+
+export async function fetchQbo({
+  accessToken,
+  realmId,
+  path,
+  query,
+  env = (process.env.QUICKBOOKS_ENV || 'sandbox') as 'sandbox'|'production',
+}: {
+  accessToken: string;
+  realmId: string;
+  path: string;      // e.g. `/v3/company/${realmId}/reports/ProfitAndLoss`
+  query?: Record<string,string|number|boolean>;
+  env?: 'sandbox'|'production';
+}) {
+  const base = getQboBase(env);
+  const url = new URL(base + path);
+  Object.entries(query || {}).forEach(([k,v]) => url.searchParams.set(k, String(v)));
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json'
+    }
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`QBO fetch failed ${res.status}: ${txt}`);
+  }
+  return res.json();
+}
+*/
+
+// ===================== app/api/qbo/refresh/route.ts =====================
+// Place in: app/api/qbo/refresh/route.ts
+/*
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import OAuthClient from 'intuit-oauth';
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const clinic_id = url.searchParams.get('clinic_id');
+  if (!clinic_id) return NextResponse.json({ error: 'clinic_id required' }, { status: 400 });
+
+  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const { data: row, error } = await supabase.from('qbo_connections').select('*').eq('clinic_id', clinic_id).maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!row?.refresh_token) return NextResponse.json({ error: 'Not connected' }, { status: 400 });
+
+  const oauth = new OAuthClient({
+    clientId: process.env.QUICKBOOKS_CLIENT_ID!,
+    clientSecret: process.env.QUICKBOOKS_CLIENT_SECRET!,
+    environment: (process.env.QUICKBOOKS_ENV || 'sandbox') as 'sandbox'|'production',
+    redirectUri: process.env.QUICKBOOKS_REDIRECT_URL!,
+  });
+
+  try {
+    const tokenRes = await oauth.refreshUsingToken(row.refresh_token);
+    const token = tokenRes.getJson();
+    const accessToken = token.access_token;
+    const refreshToken = token.refresh_token || row.refresh_token; // QBO sometimes rotates
+    const expiresIn = token.x_refresh_token_expires_in || token.expires_in;
+    const expiresAt = new Date(Date.now() + Number(expiresIn) * 1000).toISOString();
+
+    const { error: upErr } = await supabase.from('qbo_connections').upsert({
+      clinic_id,
+      realm_id: row.realm_id,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_expires_at: expiresAt,
+    }, { onConflict: 'clinic_id' });
+    if (upErr) throw upErr;
+
+    return NextResponse.json({ ok: true, token_expires_at: expiresAt });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'refresh failed' }, { status: 500 });
+  }
+}
+*/
+
+// ===================== app/api/qbo/sync/route.ts =====================
+// Place in: app/api/qbo/sync/route.ts
+/*
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { fetchQbo } from '@/lib/qboApi';
+
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(()=>({}));
+  const clinic_id = body.clinic_id as string;
+  if (!clinic_id) return NextResponse.json({ error: 'clinic_id required' }, { status: 400 });
+
+  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const { data: qbo, error } = await supabase.from('qbo_connections').select('*').eq('clinic_id', clinic_id).maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!qbo?.access_token || !qbo?.realm_id) return NextResponse.json({ error: 'QBO not connected' }, { status: 400 });
+
+  const env = (process.env.QUICKBOOKS_ENV || 'sandbox') as 'sandbox'|'production';
+
+  try {
+    // 1) AR Aging Summary
+    const ar = await fetchQbo({
+      accessToken: qbo.access_token,
+      realmId: qbo.realm_id,
+      path: `/v3/company/${qbo.realm_id}/reports/AgedReceivables` ,
+      query: { summarize_column_by: 'TotalOnly' },
+      env,
+    });
+    // NOTE: Exact JSON shape depends on QBO; below is a simplified example.
+    const arRows = (ar?.Rows?.Row || []) as any[];
+    const findVal = (label: string) => Number((arRows.find(r=>r?.ColData?.[0]?.value===label)?.ColData?.[1]?.value) || 0);
+    const ar0_30 = findVal('Current');
+    const ar31_60 = findVal('1-30');
+    const ar61p = findVal('31+');
+
+    // 2) Profit & Loss by Month, YTD
+    const year = new Date().getFullYear();
+    const pnl = await fetchQbo({
+      accessToken: qbo.access_token,
+      realmId: qbo.realm_id,
+      path: `/v3/company/${qbo.realm_id}/reports/ProfitAndLoss`,
+      query: { accounting_method: 'Accrual', columns: 'total', summarize_column_by: 'Month', start_date: `${year}-01-01`, end_date: `${year}-12-31` },
+      env,
+    });
+
+    // Simplified extraction: total income per month
+    const rows = (pnl?.Rows?.Row || []) as any[];
+    const monthTotals: Record<string, number> = {};
+    for (const r of rows) {
+      if (r?.Summary?.ColData?.[0]?.value?.includes('Total Income')) {
+        const cols = r.Summary.ColData.slice(1); // skip label column
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        cols.forEach((c: any, idx: number) => {
+          monthTotals[months[idx]] = Number(c?.value || 0) / 1000; // store in 'thousands' to match demo
+        });
+      }
+    }
+
+    // UPSERT: AR buckets
+    await supabase.from('ar_buckets').upsert([
+      { clinic_id, range: '0-30', amount: Math.round(ar0_30/1000) },
+      { clinic_id, range: '31-60', amount: Math.round(ar31_60/1000) },
+      { clinic_id, range: '61+', amount: Math.round(ar61p/1000) },
+    ]);
+
+    // UPSERT: Revenue vs Goal (keep existing goals; just update actuals)
+    const { data: existing } = await supabase.from('kpi_revenue').select('month, goal').eq('clinic_id', clinic_id);
+    const monthList = Object.keys(monthTotals);
+    for (const m of monthList) {
+      const goal = existing?.find((e:any)=>e.month===m)?.goal ?? 0;
+      await supabase.from('kpi_revenue').upsert({ clinic_id, month: m, goal, actual: monthTotals[m] });
+    }
+
+    return NextResponse.json({ ok: true, updatedMonths: monthList.length });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'sync failed' }, { status: 500 });
+  }
+}
+*/
+
+// ===================== Manual Tests (curl) =====================
+// 1) Refresh token for a clinic
+//    curl -s "http://localhost:3000/api/qbo/refresh?clinic_id=CLINIC_UUID"
+// 2) Sync AR + P&L into KPIs
+//    curl -s -X POST "http://localhost:3000/api/qbo/sync" -H 'Content-Type: application/json' -d '{"clinic_id":"CLINIC_UUID"}'
+// 3) Expect AR buckets updated (0-30,31-60,61+) and revenue actuals for months.
+
+// ===================== Nightly Sync (2am) via Vercel Cron =====================
+// Create a cron hitting each clinic individually. Example vercel.json:
+// {
+//   "crons": [
+//     { "path": "/api/qbo/refresh?clinic_id=CLINIC_UUID_1", "schedule": "0 2 * * *" },
+//     { "path": "/api/qbo/sync?clinic_id=CLINIC_UUID_1",    "schedule": "5 2 * * *" },
+//     { "path": "/api/qbo/refresh?clinic_id=CLINIC_UUID_2", "schedule": "0 2 * * *" },
+//     { "path": "/api/qbo/sync?clinic_id=CLINIC_UUID_2",    "schedule": "5 2 * * *" }
+//   ]
+// }
+// (Or build a single /api/qbo/nightly route that queries qbo_connections and loops.)
+
